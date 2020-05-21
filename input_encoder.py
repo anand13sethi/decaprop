@@ -2,10 +2,62 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Bidirectional, LSTM, TimeDistributed, Dense, Activation, Add, Lambda, Multiply, Layer
 from tensorflow.keras.models import Model
-from tensorflow.keras.activations import relu, softmax
+from tensorflow.keras.activations import relu, softmax, sigmoid
 from tensorflow.keras.initializers import Constant
 # from keras.engine.topology import Layer
 from tensorflow.keras import backend as K
+
+
+class Gated_attention_with_self(Layer):
+
+    def __init__(self, num_units = 300, emb_dim = 600, **kwargs):
+        self.num_units = num_units
+        self.emb_dim = emb_dim
+        super(Gated_attention_with_self, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.dense_1 = Dense(self.num_units, activation=relu)
+        self.dense_2 = Dense(self.num_units, activation=relu)
+        self.dense_3 = Dense(input_shape[-1], activation=sigmoid)
+        self.dense_4 = Dense(input_shape[-1], activation=sigmoid)
+        self.bilstm_1 = Bidirectional(LSTM(self.emb_dim, return_sequences=True))
+        self.bilstm_2 = Bidirectional(LSTM(self.emb_dim, return_sequences=True))
+        self.trainable_weight = self.dense_1.trainable_weights + self.dense_2.trainable_weights + self.dense_3.trainable_weights + self.dense_4.trainable_weights
+
+        super(Gated_attention_with_self, self).build(input_shape)
+
+    def call(self, stacked_input):
+        unstacked_input = tf.unstack(stacked_input)
+        input_1 = unstacked_input[0]        # Passage Input
+        input_2 = unstacked_input[1]        # Query Input (P' in case of Self Attention)
+    
+        dense_1_op = self.dense_1(input_1)
+        dense_2_op = self.dense_2(input_2)
+
+        co_mat = tf.matmul(dense_1_op, tf.transpose(dense_2_op, perm = [0, 2, 1]))
+        co_mat = 1/np.sqrt(self.emb_dim) * co_mat     # TODO: check if emb_dim or input_passage_dim
+
+        activation = Activation(softmax)
+        passage_bar = activation(co_mat)
+
+        passage_bar = tf.matmul(passage_bar, input_2)
+        passage_concat = tf.concat([input_1, passage_bar], 2)
+
+        dense_3_op = self.dense_3(passage_concat)
+        passage_mul = tf.multiply(dense_3_op, input_1)
+        
+        query_depend_passage = self.bilstm_1(passage_mul)
+
+        # Self Attention Part
+
+        p_dash_concat = tf.concat([input_1, query_depend_passage], 2)
+        dense_4_op = self.dense_4(p_dash_concat)
+        p_dash_mul = tf.multiply(dense_4_op, input_1)
+        query_depend_p_dash = self.bilstm_2(p_dash_mul)
+
+        return query_depend_passage, query_depend_p_dash
+        
+
 
 class Factorization_machine(Layer):
 
@@ -100,7 +152,7 @@ class BAC(Layer):
 
         features_passage = tf.concat(feature_p, 2)
         features_query = tf.concat(feature_q, 2)
-        print(features_passage.shape)
+        
         return features_passage, features_query
 
 
@@ -172,35 +224,46 @@ def build_bilstm(emb_dim, max_passage_length = None, max_query_length = None, nu
     passage_encoded = encoder_layer_p(passage_embedding)
     query_encoded = encoder_layer_q(query_embedding)
 
-    print(passage_embedding.shape, query_embedding.shape)
-    print('----------------------------------------------')
-    print(passage_encoded.shape, query_encoded.shape)
-
-    connecters = []
+    passage_outs = []
+    query_outs = []
     num_lstm_layers = 3
     
     for i in range(num_lstm_layers):
 
         deca_encoder_p = Bidirectional(LSTM(emb_dim, return_sequences=True), name='deca_encoder_p_{}'.format(i))
         deca_encoder_q = Bidirectional(LSTM(emb_dim, return_sequences=True), name='deca_encoder_q_{}'.format(i))
-        bac_layer = BAC(name='bac_layer_{}'.format(i))
-        # bac_td = TimeDistributed(bac_layer, name=bac_layer.name + '_td')
         
-
         passage_deca = deca_encoder_p(passage_encoded)
         query_deca = deca_encoder_q(query_encoded)
 
-        passage_encoded = passage_deca
-        query_encoded = query_deca
+        passage_outs.append(passage_deca)
+        query_outs.append(query_deca)
+    
+    passage_c = tf.concat(passage_outs, 2)
+    query_c = tf.concat(query_outs, 2)
+    
+    passage_connecters = []
+    query_connecters = []
 
-        connecter_p, connecter_q = bac_layer(tf.stack([passage_deca, query_deca]))
+    for i in range(num_lstm_layers):
+        for j in range(num_lstm_layers):
+            bac_layer = BAC(name='bac_layer_p_{}_q_{}'.format(i, j))
+            connecter_p, connecter_q = bac_layer(tf.stack([passage_outs[i], query_outs[j]]))
 
-        print(connecter_p.shape, connecter_q.shape)
+            passage_connecters.append(connecter_p)
+            query_connecters.append(connecter_q)
 
-        connecters.append([connecter_p, connecter_q])
+    connecter_pc = tf.concat(passage_connecters, 2)
+    connecter_qc = tf.concat(query_connecters, 2)
+
+    passage_decaout = tf.concat([passage_c, connecter_pc], 2)
+    query_decaout = tf.concat([query_c, connecter_qc], 2)
+
+    gated_attention_layer = Gated_attention_with_self()
+    gated_atten_op, gated_self_atten_op = gated_attention_layer(tf.stack([passage_decaout, query_decaout]))
 
 
-    model = Model(inputs = [passage_input, query_input], outputs = connecters)
+    model = Model(inputs = [passage_input, query_input], outputs = [gated_atten_op, gated_self_atten_op])
     model.build(input_shape=(max_passage_length, emb_dim))
     model.summary()
 

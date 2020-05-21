@@ -147,3 +147,39 @@ encoder_layer = Bidirectional(LSTM(emb_dim, recurrent_dropout = encoder_dropout,
     bac_layer = BAC(name='BAC_layer')
     some_layer = TimeDistributed(bac_layer, name='connecter_Layer')
     passage_connecters, query_connecters = some_layer(passage_deca, query_deca)
+
+
+
+
+
+    # class Gated_attention(Layer):
+
+#     def __init__(self, num_units = 300, emb_dim = 600, **kwargs):
+#         self.num_units = num_units
+#         self.emb_dim = emb_dim
+#         super(Gated_attention, self).__init__(**kwargs)
+    
+#     def build(self, input_shape):
+#         self.dense_1 = Dense(self.num_units, activation=relu)
+#         self.dense_2 = Dense(self.num_units, activation=relu)
+#         self.dense_3 = Dense(self.num_units, activation=sigmoid)
+#         self.trainable_weight = self.dense_1.trainable_weights + self.dense_2.trainable_weights + self.dense_3.trainable_weights
+
+#         super(Gated_attention, self).build(input_shape)
+    
+#     def call(self, stacked_input):
+#         unstacked_input = tf.unstack(stacked_input)
+#         input_1 = unstacked_input[0]        # Passage Input
+#         input_2 = unstacked_input[1]        # Query Input (P' in case of Self Attention)
+        
+#         dense_1_op = self.dense_1(input_1)
+#         dense_2_op = self.dense_2(input_2)
+
+#         co_mat = tf.matmul(dense_1_op, tf.transpose(dense_2_op, perm = [0, 2, 1]))
+#         co_mat = 1/tf.sqrt(self.emb_dim) * co_mat     # TODO: check if emb_dim or input_passage_dim
+
+#         activation = Activation(softmax)
+#         passage_bar = activation(co_mat)
+
+#         passage_bar = tf.matmul(passage_bar, input_2)
+#         passage_concat = tf.concat([input_1, passage_bar])
