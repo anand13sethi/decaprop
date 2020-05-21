@@ -261,9 +261,24 @@ def build_bilstm(emb_dim, max_passage_length = None, max_query_length = None, nu
 
     gated_attention_layer = Gated_attention_with_self()
     gated_atten_op, gated_self_atten_op = gated_attention_layer(tf.stack([passage_decaout, query_decaout]))
+    
+    atten_outs = [gated_atten_op, gated_self_atten_op]
 
+    conn_list = []
 
-    model = Model(inputs = [passage_input, query_input], outputs = [gated_atten_op, gated_self_atten_op])
+    for i in range(2):
+        for j in range(num_lstm_layers):
+            one_sided_bac = BAC(name='one_sided_bac_u{}_q{}'.format(i, j))
+            connecter_1, connecter_2 = one_sided_bac(tf.stack([atten_outs[i], query_outs[j]]))
+
+            conn_list.append(connecter_1)
+            conn_list.append(connecter_2)
+    
+    conn_c = tf.concat(conn_list, 2)
+
+    m_mat = tf.concat([gated_self_atten_op, conn_c], 2)
+
+    model = Model(inputs = [passage_input, query_input], outputs = m_mat)
     model.build(input_shape=(max_passage_length, emb_dim))
     model.summary()
 
