@@ -1,0 +1,17 @@
+k = 5, d = 600, n = 400/200
+
+input_vec = (None, 400, 600) -> (None, 400, 600)
+seq_len = 400
+dims = 600
+fm_p = 600
+fm_w0 = (0)
+fm_w = (600) -> (600,)
+fm_V = (None, 5, 600)
+fm_linear_terms = (400, 1)
+fm_interactions_part1 = (400, 5)
+fm_interactions_part2 = (400, 5)
+latent_dim = (400, 5)
+fm_interactions = (400, 1)
+
+conn = (200, 1) -> 2D
+fe = ((200, 1), (200, 1), (200, 1)) -> 3, 200, 1
