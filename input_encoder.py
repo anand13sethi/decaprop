@@ -278,9 +278,21 @@ def build_bilstm(emb_dim, max_passage_length = None, max_query_length = None, nu
 
     m_mat = tf.concat([gated_self_atten_op, conn_c], 2)
 
-    model = Model(inputs = [passage_input, query_input], outputs = m_mat)
+    start_projection = Bidirectional(LSTM(emd_dim, name='bilstm_span_start'))
+    end_projection = Bidirectional(LSTM(emd_dim, name='bilstm_span_end'))
+
+    span_start = start_projection(m_mat)
+    span_end = start_projection(span_start)
+
+    loss_start = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(start_pointer), logits=span_start, axis=1)
+    loss_end = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(end_pointer), logits=span_end, axis=1)
+
+    cost = tf.reduce_mean(loss_start + loss_end)
+
+    model = Model(inputs = [passage_input, query_input], outputs = [span_start, span_end])
     model.build(input_shape=(max_passage_length, emb_dim))
     model.summary()
+    
 
 
 build_bilstm(600, 200, 200)
