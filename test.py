@@ -6,8 +6,8 @@ import tensorflow as tf
 # # input_vec = tf.reshape(input_vec, [-1, 3])
 # input_vec = tf.concat(input_vec, 2)
 x = tf.zeros((32, 2, 3))
-y = tf.zeros((32, 1, 5))
-z = tf.concat([x, y], 1)
+y = tf.zeros((32, 1, 3))
+z = tf.concat([x, y], 2)
 print(z.shape)
 # a = z[:z.shape[0]//2, :, :]
 # b = z[z.shape[0]//2:, :, :]

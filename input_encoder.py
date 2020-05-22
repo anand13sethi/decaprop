@@ -120,10 +120,12 @@ class BAC(Layer):
         super(BAC, self).__init__(**kwargs)
     
     def build(self, input_shape):
+        passage_shape = (input_shape[0], self.passage_len, input_shape[-1])
+        query_shape = (input_shape[0], input_shape[1] - self.passage_len, input_shape[-1])
         self.dense_1 = Dense(self.nn_units, activation=relu, use_bias=True)
-        self.dense_1.build(input_shape)
+        self.dense_1.build(passage_shape)
         self.dense_2 = Dense(self.nn_units, activation=relu, use_bias=True)
-        self.dense_2.build(input_shape)
+        self.dense_2.build(query_shape)
         self.trainable_weight = self.dense_1.trainable_weights + self.dense_2.trainable_weights
 
         super(BAC, self).build(input_shape)  # Be sure to call this at the end
@@ -139,8 +141,8 @@ class BAC(Layer):
         affinity_matrix = tf.matmul(passage_dense, tf.transpose(query_dense, perm = [0, 2, 1]))
         affinity_matrix = 1/np.sqrt(self.emb_dim) * affinity_matrix
         activation = Activation(softmax)
-        aligned_p = activation(affinity_matrix)
-        aligned_q = activation(tf.transpose(affinity_matrix, perm = [0, 2, 1]))
+        aligned_p = activation(tf.transpose(affinity_matrix, perm = [0, 2, 1]))
+        aligned_q = activation(affinity_matrix)
         passage_aligned = tf.matmul(aligned_p, passage_input)
         query_aligned = tf.matmul(aligned_q, query_input)
 
@@ -294,10 +296,12 @@ def build_bilstm(start_pointer, end_pointer, emb_dim, max_passage_length = None,
         for j in range(num_lstm_layers):
             one_sided_bac = BAC(name='one_sided_bac_u{}_q{}'.format(i, j))
             connecter_1, connecter_2 = one_sided_bac(tf.concat([atten_outs[i], query_outs[j]], 1))
-
+            
             conn_list.append(connecter_1)
-            conn_list.append(connecter_2)
+            # conn_list.append(connecter_2)     #TODO: Check Upper BAC in code.
     
+    for k in range(len(conn_list)):
+        print(conn_list[k].shape)
     conn_c = tf.concat(conn_list, 2)
 
     m_mat = tf.concat([gated_self_atten_op, conn_c], 2)
@@ -335,4 +339,4 @@ def build_bilstm(start_pointer, end_pointer, emb_dim, max_passage_length = None,
 
 
 
-build_bilstm(None, None, 600, 200, 200)
+build_bilstm(None, None, 600, 200, 30)
