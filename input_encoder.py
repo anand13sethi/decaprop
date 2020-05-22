@@ -4,32 +4,47 @@ from tensorflow.keras.layers import Input, Bidirectional, LSTM, TimeDistributed,
 from tensorflow.keras.models import Model
 from tensorflow.keras.activations import relu, softmax, sigmoid
 from tensorflow.keras.initializers import Constant
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.metrics import Accuracy
 # from keras.engine.topology import Layer
 from tensorflow.keras import backend as K
 
 
 class Gated_attention_with_self(Layer):
 
-    def __init__(self, num_units = 300, emb_dim = 600, **kwargs):
+    def __init__(self, passage_len = 200, num_units = 300, emb_dim = 600, **kwargs):
         self.num_units = num_units
         self.emb_dim = emb_dim
+        self.passaage_len = passage_len
         super(Gated_attention_with_self, self).__init__(**kwargs)
 
     def build(self, input_shape):
+        print(input_shape)
+        passage_shape = (input_shape[0], self.passaage_len, input_shape[-1])
+        query_shape = (input_shape[0], input_shape[1] - self.passaage_len, input_shape[-1])
+        concat_shape = (input_shape[0], self.passaage_len, input_shape[-1]*2)
         self.dense_1 = Dense(self.num_units, activation=relu)
+        self.dense_1.build(passage_shape)
         self.dense_2 = Dense(self.num_units, activation=relu)
+        self.dense_2.build(query_shape)
         self.dense_3 = Dense(input_shape[-1], activation=sigmoid)
+        self.dense_3.build(concat_shape)
         self.dense_4 = Dense(input_shape[-1], activation=sigmoid)
+        self.dense_4.build((input_shape[0], self.passaage_len, input_shape[-1]+(self.emb_dim*2)))
         self.bilstm_1 = Bidirectional(LSTM(self.emb_dim, return_sequences=True))
+        self.bilstm_1.build(passage_shape)
         self.bilstm_2 = Bidirectional(LSTM(self.emb_dim, return_sequences=True))
+        self.bilstm_2.build(passage_shape)
         self.trainable_weight = self.dense_1.trainable_weights + self.dense_2.trainable_weights + self.dense_3.trainable_weights + self.dense_4.trainable_weights
 
         super(Gated_attention_with_self, self).build(input_shape)
 
     def call(self, stacked_input):
-        unstacked_input = tf.unstack(stacked_input)
-        input_1 = unstacked_input[0]        # Passage Input
-        input_2 = unstacked_input[1]        # Query Input (P' in case of Self Attention)
+        # unstacked_input = tf.unstack(stacked_input)
+        input_1 = stacked_input[:, :self.passaage_len, :]        # Passage Input
+        input_2 = stacked_input[:, self.passaage_len:, :]        # Query Input (P' in case of Self Attention)
+
+        print(input_1.shape, input_2.shape)
     
         dense_1_op = self.dense_1(input_1)
         dense_2_op = self.dense_2(input_2)
@@ -43,6 +58,8 @@ class Gated_attention_with_self(Layer):
         passage_bar = tf.matmul(passage_bar, input_2)
         passage_concat = tf.concat([input_1, passage_bar], 2)
 
+        print(passage_concat.shape)
+
         dense_3_op = self.dense_3(passage_concat)
         passage_mul = tf.multiply(dense_3_op, input_1)
         
@@ -51,6 +68,7 @@ class Gated_attention_with_self(Layer):
         # Self Attention Part
 
         p_dash_concat = tf.concat([input_1, query_depend_passage], 2)
+        print(query_depend_passage.shape, p_dash_concat.shape)
         dense_4_op = self.dense_4(p_dash_concat)
         p_dash_mul = tf.multiply(dense_4_op, input_1)
         query_depend_p_dash = self.bilstm_2(p_dash_mul)
@@ -94,10 +112,11 @@ class Factorization_machine(Layer):
 
 class BAC(Layer):
 
-    def __init__(self, activation = 'softmax', nn_units = 300, emb_dim = 600, **kwargs):
+    def __init__(self, passage_len = 200, activation = 'softmax', nn_units = 300, emb_dim = 600, **kwargs):
         self.activation = activation
         self.nn_units = nn_units
         self.emb_dim = emb_dim
+        self.passage_len = passage_len
         super(BAC, self).__init__(**kwargs)
     
     def build(self, input_shape):
@@ -110,9 +129,10 @@ class BAC(Layer):
         super(BAC, self).build(input_shape)  # Be sure to call this at the end
     
     def call(self, stack_input):
-        unstack_input = tf.unstack(stack_input)
-        passage_input = unstack_input[0]
-        query_input = unstack_input[1]
+        # unstack_input = tf.unstack(stack_input)
+
+        passage_input = stack_input[:, :self.passage_len, :]
+        query_input = stack_input[:, self.passage_len:, :]
         
         passage_dense = self.dense_1(passage_input)
         query_dense = self.dense_2(query_input)
@@ -248,7 +268,7 @@ def build_bilstm(start_pointer, end_pointer, emb_dim, max_passage_length = None,
     for i in range(num_lstm_layers):
         for j in range(num_lstm_layers):
             bac_layer = BAC(name='bac_layer_p_{}_q_{}'.format(i, j))
-            connecter_p, connecter_q = bac_layer(tf.stack([passage_outs[i], query_outs[j]]))
+            connecter_p, connecter_q = bac_layer(tf.concat([passage_outs[i], query_outs[j]], 1))
 
             passage_connecters.append(connecter_p)
             query_connecters.append(connecter_q)
@@ -259,17 +279,21 @@ def build_bilstm(start_pointer, end_pointer, emb_dim, max_passage_length = None,
     passage_decaout = tf.concat([passage_c, connecter_pc], 2)
     query_decaout = tf.concat([query_c, connecter_qc], 2)
 
+    print(passage_decaout.shape, query_decaout.shape)
+
     gated_attention_layer = Gated_attention_with_self()
-    gated_atten_op, gated_self_atten_op = gated_attention_layer(tf.stack([passage_decaout, query_decaout]))
+    gated_atten_op, gated_self_atten_op = gated_attention_layer(tf.concat([passage_decaout, query_decaout], 1))
     
     atten_outs = [gated_atten_op, gated_self_atten_op]
 
     conn_list = []
 
+    print(atten_outs[0].shape, query_outs[0].shape)
+
     for i in range(2):
         for j in range(num_lstm_layers):
             one_sided_bac = BAC(name='one_sided_bac_u{}_q{}'.format(i, j))
-            connecter_1, connecter_2 = one_sided_bac(tf.stack([atten_outs[i], query_outs[j]]))
+            connecter_1, connecter_2 = one_sided_bac(tf.concat([atten_outs[i], query_outs[j]], 1))
 
             conn_list.append(connecter_1)
             conn_list.append(connecter_2)
@@ -281,21 +305,34 @@ def build_bilstm(start_pointer, end_pointer, emb_dim, max_passage_length = None,
     start_projection = Bidirectional(LSTM(emb_dim, name='bilstm_span_start', return_sequences=True))
     end_projection = Bidirectional(LSTM(emb_dim, name='bilstm_span_end', return_sequences=True))
 
+    softamx_start = Dense(1, activation=softmax, use_bias=False, name='start_softmax')
+    softamx_end = Dense(1, activation=softmax, use_bias=False, name='end_softmax')
+
     span_start = start_projection(m_mat)
-    span_end = start_projection(span_start)
+    span_end = end_projection(span_start)
 
-    start_pointer = tf.zeros((200, 1))
-    end_pointer = tf.zeros((200, 1))
+    start_pred = softamx_start(span_start)
+    end_pred = softamx_end(span_end)
 
-    loss_start = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(start_pointer), logits=span_start, axis=1)
-    loss_end = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(end_pointer), logits=span_end, axis=1)
+    # start_pointer = tf.zeros((32, 200, 1))
+    # end_pointer = tf.zeros((32, 200, 1))
 
-    cost = tf.reduce_mean(loss_start + loss_end)
+    # loss_start = tf.math.log(tf.reduce_sum(tf.multiply(start_pred, start_pointer)))
+    # loss_end = tf.math.log(tf.reduce_sum(tf.multiply(end_pred, end_pointer)))
 
-    model = Model(inputs = [passage_input, query_input], outputs = [span_start, span_end])
+    loss_start = tf.math.log(tf.reduce_sum(tf.multiply(start_pred, start_pred), axis=1))
+    loss_end = tf.math.log(tf.reduce_sum(tf.multiply(end_pred, end_pred), axis=1))
+    
+    cost = tf.reduce_mean(tf.math.add(loss_start, loss_end), axis=0)
+
+    print(loss_start.shape, loss_end.shape, cost.shape)
+
+    model = Model(inputs = [passage_input, query_input], outputs = [start_pred, end_pred])
     model.build(input_shape=(max_passage_length, emb_dim))
     model.summary()
 
+    # model.compile(optimizer=Adam(learning_rate=0.001), loss=cost)
 
 
-build_bilstm(600, 200, 200)
+
+build_bilstm(None, None, 600, 200, 200)
