@@ -203,7 +203,7 @@ class Highway(Layer):
 
 
 
-def build_bilstm(emb_dim, max_passage_length = None, max_query_length = None, num_highway_layer = 2, num_decoder = 1, encoder_dropout = 0, decoder_dropout = 0):
+def build_bilstm(start_pointer, end_pointer, emb_dim, max_passage_length = None, max_query_length = None, num_highway_layer = 2, num_decoder = 1, encoder_dropout = 0, decoder_dropout = 0):
 
     passage_input = Input(shape = (max_passage_length, emb_dim), dtype = 'float32', name = 'passage_input')
     query_input = Input(shape = (max_query_length, emb_dim), dtype = 'float32', name = 'query_input')
@@ -278,11 +278,14 @@ def build_bilstm(emb_dim, max_passage_length = None, max_query_length = None, nu
 
     m_mat = tf.concat([gated_self_atten_op, conn_c], 2)
 
-    start_projection = Bidirectional(LSTM(emd_dim, name='bilstm_span_start'))
-    end_projection = Bidirectional(LSTM(emd_dim, name='bilstm_span_end'))
+    start_projection = Bidirectional(LSTM(emb_dim, name='bilstm_span_start', return_sequences=True))
+    end_projection = Bidirectional(LSTM(emb_dim, name='bilstm_span_end', return_sequences=True))
 
     span_start = start_projection(m_mat)
     span_end = start_projection(span_start)
+
+    start_pointer = tf.zeros((200, 1))
+    end_pointer = tf.zeros((200, 1))
 
     loss_start = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(start_pointer), logits=span_start, axis=1)
     loss_end = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(end_pointer), logits=span_end, axis=1)
@@ -292,7 +295,7 @@ def build_bilstm(emb_dim, max_passage_length = None, max_query_length = None, nu
     model = Model(inputs = [passage_input, query_input], outputs = [span_start, span_end])
     model.build(input_shape=(max_passage_length, emb_dim))
     model.summary()
-    
+
 
 
 build_bilstm(600, 200, 200)
